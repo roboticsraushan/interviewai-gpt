@@ -1,0 +1,8 @@
+Flask
+flask-cors
+google-cloud
+#May be I do not want to install
+#google-generativeai
+google-cloud-aiplatform
+
+
