@@ -25,3 +25,8 @@ Thumbs.db
 .env.local
 config/secrets.json  
 Chatbot/backend/account-key.json
+
+#build file
+Chatbot/frontend/build/
+Chatbot/frontend/node_modules/
+Chatbot/backend/build/
