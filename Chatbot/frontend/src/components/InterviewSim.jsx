@@ -1,43 +1,120 @@
-import React, { useState } from "react";
+import React, { useState, useEffect} from "react";
+import io from "socket.io-client";
 
-const API_BASE = "http://35.188.170.210:5000"; // Replace with your VM IP
+const API_BASE = process.env.REACT_APP_API_BASE;
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL;
+
+
+let mediaRecorder;
+let socket;
 
 function InterviewSim() {
-  const [input, setInput] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const [finalTranscript, setFinalTranscript] = useState("");
   const [response, setResponse] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
 
-  const handleSend = async () => {
+  useEffect(() => {
+    socket = io(SOCKET_URL);
+
+    socket.on("transcript_update", ({ transcript, isFinal }) => {
+      if (isFinal) {
+        setFinalTranscript((prev) => prev + " " + transcript);
+        setTranscript("");
+      } else {
+        setTranscript(transcript); // interim updates
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  const startRecording = async () => {
+    setTranscript("");
+    setFinalTranscript("");
+    setResponse("");
+    setIsRecording(true);
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+
+    socket.emit("start_transcription"); // initialize backend listener
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64data = reader.result.split(",")[1];
+          socket.emit("audio_chunk", base64data); // send to Flask
+        };
+        reader.readAsDataURL(event.data);
+      }
+    };
+
+    mediaRecorder.start(250); // emit audio every 250ms
+  };
+
+  const stopRecording = async () => {
+    mediaRecorder.stop();
+    setIsRecording(false);
+
+    const finalText = finalTranscript.trim();
+    if (!finalText) return;
+
     try {
       const res = await fetch(`${API_BASE}/onboarding/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({ message: finalText }),
       });
 
       const data = await res.json();
-      setResponse(data.echo || "No response from server");
+      const reply = data?.profile?.summary || data?.echo || "No response from server";
+      setResponse(reply);
+      speakText(reply);
     } catch (error) {
       setResponse("Error connecting to backend.");
     }
   };
 
+  const speakText = (text) => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+    speechSynthesis.speak(utterance);
+  };
+
   return (
-    <div style={{ marginTop: "1rem" }}>
-      <input
-        type="text"
-        value={input}
-        placeholder="Type your intro here"
-        onChange={(e) => setInput(e.target.value)}
-        style={{ padding: "0.5rem", width: "300px" }}
-      />
+    <div style={{ marginTop: "2rem", fontFamily: "Arial, sans-serif" }}>
+      <h2>🎙️ InterviewAI (Voice Mode)</h2>
+
       <button
-        onClick={handleSend}
-        style={{ marginLeft: "1rem", padding: "0.5rem 1rem" }}
+        onClick={isRecording ? stopRecording : startRecording}
+        style={{ padding: "0.5rem 1rem", marginBottom: "1rem" }}
       >
-        Send
+        {isRecording ? "🛑 Stop Recording" : "🎤 Start Speaking"}
       </button>
+
       <div style={{ marginTop: "1rem" }}>
-        <strong>Response:</strong> {response}
+        <strong>🗣️ Live Transcript:</strong>
+        <div style={{ color: "#444", marginTop: "0.5rem", whiteSpace: "pre-wrap" }}>
+          {transcript || "(waiting...)"}
+        </div>
+      </div>
+
+      <div style={{ marginTop: "1rem" }}>
+        <strong>✅ Final Transcript:</strong>
+        <div style={{ color: "#222", marginTop: "0.5rem", whiteSpace: "pre-wrap" }}>
+          {finalTranscript || "(waiting for input...)"}
+        </div>
+      </div>
+
+      <div style={{ marginTop: "1.5rem", fontSize: "1.1rem" }}>
+        <strong>🤖 AI Response:</strong>
+        <div style={{ color: "#0077cc", marginTop: "0.5rem", whiteSpace: "pre-wrap" }}>
+          {response || "(waiting for reply...)"}
+        </div>
       </div>
     </div>
   );
