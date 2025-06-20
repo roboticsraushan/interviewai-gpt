@@ -1,11 +1,11 @@
-import React, { useState, useEffect} from "react";
+import React, { useState, useEffect } from "react";
 import io from "socket.io-client";
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL;
 
-
 let mediaRecorder;
+let stream;
 let socket;
 
 function InterviewSim() {
@@ -22,7 +22,7 @@ function InterviewSim() {
         setFinalTranscript((prev) => prev + " " + transcript);
         setTranscript("");
       } else {
-        setTranscript(transcript); // interim updates
+        setTranscript(transcript);
       }
     });
 
@@ -37,28 +37,40 @@ function InterviewSim() {
     setResponse("");
     setIsRecording(true);
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     mediaRecorder = new MediaRecorder(stream);
 
-    socket.emit("start_transcription"); // initialize backend listener
+    socket.emit("start_transcription");
 
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
         const reader = new FileReader();
         reader.onloadend = () => {
           const base64data = reader.result.split(",")[1];
-          socket.emit("audio_chunk", base64data); // send to Flask
+          socket.emit("audio_chunk", base64data);
         };
         reader.readAsDataURL(event.data);
       }
     };
 
-    mediaRecorder.start(250); // emit audio every 250ms
+    mediaRecorder.start(250);
   };
 
   const stopRecording = async () => {
-    mediaRecorder.stop();
     setIsRecording(false);
+
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop();
+      mediaRecorder.ondataavailable = null;
+    }
+
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+
+    mediaRecorder = null;
+    stream = null;
+    socket.emit("stop_transcription");
 
     const finalText = finalTranscript.trim();
     if (!finalText) return;
@@ -71,7 +83,8 @@ function InterviewSim() {
       });
 
       const data = await res.json();
-      const reply = data?.profile?.summary || data?.echo || "No response from server";
+      const reply =
+        data?.profile?.summary || data?.echo || "No response from server";
       setResponse(reply);
       speakText(reply);
     } catch (error) {
@@ -98,21 +111,27 @@ function InterviewSim() {
 
       <div style={{ marginTop: "1rem" }}>
         <strong>🗣️ Live Transcript:</strong>
-        <div style={{ color: "#444", marginTop: "0.5rem", whiteSpace: "pre-wrap" }}>
+        <div
+          style={{ color: "#444", marginTop: "0.5rem", whiteSpace: "pre-wrap" }}
+        >
           {transcript || "(waiting...)"}
         </div>
       </div>
 
       <div style={{ marginTop: "1rem" }}>
         <strong>✅ Final Transcript:</strong>
-        <div style={{ color: "#222", marginTop: "0.5rem", whiteSpace: "pre-wrap" }}>
+        <div
+          style={{ color: "#222", marginTop: "0.5rem", whiteSpace: "pre-wrap" }}
+        >
           {finalTranscript || "(waiting for input...)"}
         </div>
       </div>
 
       <div style={{ marginTop: "1.5rem", fontSize: "1.1rem" }}>
         <strong>🤖 AI Response:</strong>
-        <div style={{ color: "#0077cc", marginTop: "0.5rem", whiteSpace: "pre-wrap" }}>
+        <div
+          style={{ color: "#0077cc", marginTop: "0.5rem", whiteSpace: "pre-wrap" }}
+        >
           {response || "(waiting for reply...)"}
         </div>
       </div>

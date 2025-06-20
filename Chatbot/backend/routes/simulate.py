@@ -21,11 +21,13 @@ recognition_config = speech.RecognitionConfig(
     language_code="en-US",
     enable_automatic_punctuation=True,
     model="default",
+    use_enhanced=True #enables phone-quality model
 )
 
 streaming_config = speech.StreamingRecognitionConfig(
     config=recognition_config,
     interim_results=True,
+    single_utterance=False
 )
 
 # Thread-safe queue for incoming audio chunks
@@ -64,16 +66,30 @@ def register_socketio_handlers(socketio):
             print("🧠 Starting transcription thread")
             transcription_thread = threading.Thread(target=transcribe_stream_background, args=(socketio,))
             transcription_thread.start()
+    @socketio.on("stop_transcription")
+    def stop_transcription():
+        global transcription_thread
+        print(" Stopping transcription thread")
+        transcription_thread = None
+        with audio_queue.mutex:
+            audio_queue.queue.clear()
 
 # --- Streaming transcription task ---
 
 def audio_generator():
     while True:
         chunk = audio_queue.get()
+        if chunk is None:
+            print("Received empty chunk - skipping")
+            continue
+        if len(chunk) < 500: #too small might be corrupted
+            print("Chunk is too small : ", len(chunk))
+            continue
         print("🧠 sending chunk to gcp at",  time.time(), " size : ", len(chunk))
         yield speech.StreamingRecognizeRequest(audio_content=chunk)
 
 def transcribe_stream_background(socketio):
+    global transcription_thread
     try:
         responses = speech_client.streaming_recognize(
             config=streaming_config,
@@ -94,3 +110,5 @@ def transcribe_stream_background(socketio):
             })
     except Exception as e:
         print(f"❌ Transcription error: {e}")
+    finally:
+        transcription_thread = None
