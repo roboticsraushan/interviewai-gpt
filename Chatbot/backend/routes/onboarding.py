@@ -5,20 +5,22 @@ onboarding_bp = Blueprint('onboarding', __name__)
 
 @onboarding_bp.route('/', methods=['POST'])
 def onboarding():
-    try:
-        data = request.get_json()
-        message = data.get("message", "").strip()
+    data = request.get_json()
+    transcript = data.get("message", "")
 
-        if not message:
-            return jsonify({"error": "Message is required"}), 400
+    if not transcript:
+        return jsonify({"error": "Empty message"}), 400
 
-        profile = extract_profile(message)
+    profile_data = extract_profile(transcript)
 
-        return jsonify({
-            "status": "success",
-            "profile": profile
-        }), 200
+    if "error" in profile_data:
+        return jsonify({"echo": profile_data["raw_response"]})  # fallback
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Create a summary string from extracted fields
+    summary = f"You are a {profile_data['role']} with {profile_data['experience']} experience, aiming to {profile_data['goal']}."
 
+    return jsonify({
+        "profile": {
+            "summary": summary
+        }
+    })
