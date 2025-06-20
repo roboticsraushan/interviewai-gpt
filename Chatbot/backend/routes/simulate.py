@@ -16,8 +16,8 @@ speech_client = speech.SpeechClient()
 
 # Audio config for Google Cloud Speech-to-Text
 recognition_config = speech.RecognitionConfig(
-    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-    sample_rate_hertz=16000,
+    encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
+    sample_rate_hertz=48000, #opus default
     language_code="en-US",
     enable_automatic_punctuation=True,
     model="default",
