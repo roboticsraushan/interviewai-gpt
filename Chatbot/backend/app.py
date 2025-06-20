@@ -41,6 +41,11 @@ def serve_react(path):
     else:
         return send_from_directory(static_dir, "index.html")
 
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory(app.static_folder, 'manifest.json', mimetype='application/manifest+json')
+
+
 # Start the app
 if __name__ == "__main__":
     print("🚀 Starting InterviewAI Flask backend + SocketIO + React")

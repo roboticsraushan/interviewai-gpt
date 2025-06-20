@@ -5,6 +5,7 @@ import threading
 import base64
 import io
 import os
+import time
 
 from google.cloud import speech_v1p1beta1 as speech
 
@@ -49,6 +50,7 @@ def register_socketio_handlers(socketio):
         """
         Receives base64-encoded audio chunk from frontend and adds it to the queue.
         """
+        print("\nReceived audio chunk  : ", type(data), len(data))
         audio_bytes = base64.b64decode(data)
         audio_queue.put(audio_bytes)
 
@@ -68,8 +70,7 @@ def register_socketio_handlers(socketio):
 def audio_generator():
     while True:
         chunk = audio_queue.get()
-        if chunk is None:
-            break
+        print("🧠 sending chunk to gcp at",  time.time(), " size : ", len(chunk))
         yield speech.StreamingRecognizeRequest(audio_content=chunk)
 
 def transcribe_stream_background(socketio):
