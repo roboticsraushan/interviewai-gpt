@@ -11,8 +11,13 @@ function InterviewSim() {
     isConnected,
     isAISpeaking,
     messages,
+    profilingState,
+    profileData,
+    isProfilingComplete,
+    interviewContext,
     startRecording,
-    stopRecording
+    stopRecording,
+    resetProfiling
   } = useInterviewSession();
 
   return (
@@ -24,6 +29,8 @@ function InterviewSim() {
       onStopRecording={stopRecording}
       currentTranscript={transcript}
       isAISpeaking={isAISpeaking}
+      isProfilingComplete={isProfilingComplete}
+      profilingState={profilingState}
     />
   );
 }

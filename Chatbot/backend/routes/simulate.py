@@ -9,11 +9,15 @@ import time
 import uuid
 
 from google.cloud import speech_v1p1beta1 as speech
+from services.profile_builder import ProfileBuilder
 
 simulate_bp = Blueprint("simulate", __name__)
 
 # Initialize Google Cloud Speech client
 speech_client = speech.SpeechClient()
+
+# Initialize Profile Builder
+profile_builder = ProfileBuilder()
 
 # Audio config for Google Cloud Speech-to-Text
 recognition_config = speech.RecognitionConfig(
@@ -44,7 +48,9 @@ def register_socketio_handlers(socketio):
             'audio_queue': queue.Queue(),
             'transcription_thread': None,
             'stop_streaming': False,
-            'socket_id': request.sid  # Store the socket ID for this session
+            'socket_id': request.sid,  # Store the socket ID for this session
+            'profiling_complete': False,
+            'user_profile': None
         }
         # Store session_id in Flask-SocketIO session
         session['session_id'] = session_id
@@ -152,6 +158,57 @@ def register_socketio_handlers(socketio):
                 session_obj['audio_queue'].get_nowait()
         except queue.Empty:
             pass
+
+    @socketio.on("complete_profiling")
+    def handle_complete_profiling(data):
+        """Handle completion of user profiling"""
+        session_id = session.get('session_id')
+        
+        if not session_id or session_id not in active_sessions:
+            print("❌ No valid session found for complete_profiling")
+            return
+            
+        try:
+            profile_data = data.get('profileData', {})
+            
+            # Create profile using ProfileBuilder
+            profile = profile_builder.create_profile(session_id, profile_data)
+            
+            # Update session
+            active_sessions[session_id]['profiling_complete'] = True
+            active_sessions[session_id]['user_profile'] = profile
+            
+            # Generate interview context
+            interview_context = profile_builder.generate_interview_context(session_id)
+            
+            socketio.emit("profiling_completed", {
+                "success": True,
+                "profile": profile,
+                "interview_context": interview_context
+            })
+            
+            print(f"✅ Profiling completed for session: {session_id}")
+            
+        except Exception as e:
+            print(f"❌ Error completing profiling: {e}")
+            socketio.emit("profiling_completed", {
+                "success": False,
+                "error": str(e)
+            })
+
+    @socketio.on("get_profile")
+    def handle_get_profile():
+        """Get current user profile"""
+        session_id = session.get('session_id')
+        
+        if not session_id or session_id not in active_sessions:
+            print("❌ No valid session found for get_profile")
+            return
+            
+        profile = profile_builder.get_profile(session_id)
+        socketio.emit("profile_data", {
+            "profile": profile
+        })
 
 # --- Streaming transcription task ---
 

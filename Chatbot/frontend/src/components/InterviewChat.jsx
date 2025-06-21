@@ -10,15 +10,17 @@ const InterviewChat = ({
   onStartRecording,
   onStopRecording,
   currentTranscript = "",
-  isAISpeaking = false
+  isAISpeaking = false,
+  isProfilingComplete = false,
+  profilingState = null
 }) => {
   const messagesEndRef = useRef(null);
   const [isListening, setIsListening] = useState(false);
 
-  // Auto scroll to bottom when new messages arrive
+  // Auto scroll to bottom when new messages arrive or when transcript updates
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, currentTranscript]);
 
   // Simulate listening animation
   useEffect(() => {
@@ -38,28 +40,45 @@ const InterviewChat = ({
     }
   };
 
-  // Reverse messages for newest at ai
-  const reversedMessages = [...messages].reverse();
-
   return (
-    <div className="min-h-screen max-h-screen overflow-hidden flex flex-col items-center justify-center px-4 py-8" 
+    <div className="h-screen max-h-screen overflow-hidden flex flex-col items-center px-4 py-4" 
          style={{ backgroundColor: 'black' }}>
       
       {/* Main Container - Horizontally Centered */}
-      <div className="w-full max-w-4xl flex flex-col h-full">
+      <div className="w-full max-w-4xl flex flex-col h-full max-h-full overflow-hidden">
         
         {/* Header */}
         <div className="flex-shrink-0 text-center py-6">
           <div className="flex items-center justify-center space-x-4 mb-2">
-            {/* Header content removed - connection status moved to bottom right */}
+            {/* Profiling Status Indicator */}
+            {!isProfilingComplete && (
+              <div className="bg-yellow-500 bg-opacity-20 backdrop-blur-sm px-4 py-2 rounded-full border border-yellow-500">
+                <div className="flex items-center space-x-2">
+                  <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
+                  <span className="text-xs text-yellow-200 font-medium">
+                    Building your profile...
+                  </span>
+                </div>
+              </div>
+            )}
+            {isProfilingComplete && (
+              <div className="bg-green-500 bg-opacity-20 backdrop-blur-sm px-4 py-2 rounded-full border border-green-500">
+                <div className="flex items-center space-x-2">
+                  <div className="w-2 h-2 rounded-full bg-green-400" />
+                  <span className="text-xs text-green-200 font-medium">
+                    Profile complete - Interview ready!
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* AI Agent Avatar Section */}
-        <div className="flex-shrink-0 flex flex-col items-center py-8">
+        <div className="flex-shrink-0 flex flex-col items-center py-4">
           <div className="relative flex items-center justify-center">
             {/* Animated border when AI is speaking */}
-            <div className={`w-36 h-36 rounded-full p-1 transition-all duration-300 ${
+            <div className={`w-28 h-28 rounded-full p-1 transition-all duration-300 ${
               isAISpeaking 
                 ? 'bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 animate-pulse shadow-2xl' 
                 : 'bg-gradient-to-r from-gray-400 to-gray-600'
@@ -86,54 +105,71 @@ const InterviewChat = ({
           {/* <p className="text-gray-300 text-lg font-semibold mt-6">AI Agent</p> */}
         </div>
 
-        {/* Chat Messages Container - Bordered and Scrollable */}
-        <div className="flex-1 mx-4 mb-24">
+        {/* Chat Messages Container - Fixed Height Scrollable */}
+        <div className="mx-4 mb-24" style={{ height: '450px' }}>
           <div 
-            className="h-full border-2 border-gray-600 rounded-2xl bg-gray-800 bg-opacity-50 backdrop-blur-sm overflow-y-auto p-6"
-            style={{ 
-              scrollbarWidth: 'thin',
-              scrollbarColor: '#4B5563 #374151'
-            }}
+            className="h-full border-2 border-gray-400 rounded-2xl bg-white flex flex-col overflow-hidden shadow-lg"
           >
-            {/* Messages in reverse chronological order (newest at top) */}
-            <div className="space-y-6">
-              {/* Current transcript bubble at top if recording */}
-              {currentTranscript && (
-                                 <div className="flex justify-end">
-                   <div className="flex items-start space-x-3 max-w-xs lg:max-w-md">
-                     <div className="flex-shrink-0 flex items-center justify-center">
-                       <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center">
-                         <span className="text-white text-xs font-bold">YOU</span>
-                       </div>
-                     </div>
-                    <div className="px-4 py-3 bg-blue-500 text-white rounded-2xl rounded-tr-sm shadow-lg opacity-75">
-                      <div className="text-xs text-blue-100 mb-1 font-medium flex items-center">
-                        <span>YOU (speaking...)</span>
-                        <div className="ml-2 flex space-x-1">
-                          <div className="w-1 h-1 bg-blue-200 rounded-full animate-pulse"></div>
-                          <div className="w-1 h-1 bg-blue-200 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                          <div className="w-1 h-1 bg-blue-200 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
-                        </div>
-                      </div>
-                      <p className="text-sm leading-relaxed">{currentTranscript}</p>
+            {/* Chat Header */}
+            <div className="flex-shrink-0 px-6 py-3 border-b border-gray-300 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <h3 className="text-gray-700 text-sm font-medium">Interview Chat</h3>
+                <div className="text-xs text-gray-500">
+                  {messages.length} message{messages.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+            </div>
+            
+            {/* Scrollable Messages Container */}
+            <div 
+              className="flex-1 overflow-y-auto p-6 chat-scroll"
+              style={{ 
+                scrollbarWidth: 'thin',
+                scrollbarColor: '#d1d5db #f3f4f6',
+                maxHeight: '100%'
+              }}
+            >
+              {/* Messages in chronological order (oldest at top, newest at bottom) */}
+              <div className="space-y-6">
+                {/* Welcome message if no messages */}
+                {messages.length === 0 && (
+                  <div className="text-center py-12">
+                    <div className="text-gray-600 text-lg mb-4">
+                      🎙️ Ready to start your interview practice?
+                    </div>
+                    <div className="text-gray-500 text-sm">
+                      Click the microphone button below to begin speaking
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-            
-              
-              {/* Welcome message if no messages */}
-              {reversedMessages.length === 0 && (
-                <div className="text-center py-12">
-                  <div className="text-gray-400 text-lg mb-4">
-                    🎙️ Ready to start your interview practice?
+                {/* Current transcript bubble at bottom if recording */}
+                {currentTranscript && (
+                  <div className="flex justify-end">
+                    <div className="flex items-start space-x-3 max-w-xs lg:max-w-md flex-row-reverse space-x-reverse">
+                      <div className="flex-shrink-0 flex items-center justify-center">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center">
+                          <span className="text-white text-xs font-bold">YOU</span>
+                        </div>
+                      </div>
+                      <div className="px-4 py-3 bg-blue-500 text-white rounded-2xl rounded-tr-sm shadow-lg opacity-75">
+                        <div className="text-xs text-blue-100 mb-1 font-medium flex items-center">
+                          <span>YOU (speaking...)</span>
+                          <div className="ml-2 flex space-x-1">
+                            <div className="w-1 h-1 bg-blue-200 rounded-full animate-pulse"></div>
+                            <div className="w-1 h-1 bg-blue-200 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                            <div className="w-1 h-1 bg-blue-200 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                          </div>
+                        </div>
+                        <p className="text-sm leading-relaxed">{currentTranscript}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-gray-500 text-sm">
-                    Click the microphone button below to begin speaking
-                  </div>
-                </div>
-              )}
+                )}
+
+                {/* Auto-scroll anchor */}
+                <div ref={messagesEndRef} />
+              </div>
             </div>
           </div>
         </div>
@@ -198,30 +234,37 @@ const InterviewChat = ({
         html, body {
           margin: 0;
           padding: 0;
-          overflow: hidden;
+          overflow: hidden !important;
           height: 100vh;
           max-height: 100vh;
+          position: fixed;
+          width: 100%;
         }
         
         #root {
           height: 100vh;
           max-height: 100vh;
-          overflow: hidden;
+          overflow: hidden !important;
+          position: fixed;
+          width: 100%;
+          top: 0;
+          left: 0;
         }
         
-        .overflow-y-auto::-webkit-scrollbar {
+        /* Custom scrollbar for chat container only */
+        .chat-scroll::-webkit-scrollbar {
           width: 8px;
         }
-        .overflow-y-auto::-webkit-scrollbar-track {
-          background: #374151;
+        .chat-scroll::-webkit-scrollbar-track {
+          background: #f3f4f6;
           border-radius: 4px;
         }
-        .overflow-y-auto::-webkit-scrollbar-thumb {
-          background: #4B5563;
+        .chat-scroll::-webkit-scrollbar-thumb {
+          background: #d1d5db;
           border-radius: 4px;
         }
-        .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-          background: #6B7280;
+        .chat-scroll::-webkit-scrollbar-thumb:hover {
+          background: #9ca3af;
         }
       `}</style>
     </div>

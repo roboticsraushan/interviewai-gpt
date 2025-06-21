@@ -1,10 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import io from "socket.io-client";
+import { useUserProfiling } from './useUserProfiling';
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL;
 
 export const useInterviewSession = () => {
+  // User profiling hook
+  const {
+    profilingState,
+    profileData,
+    isProfilingComplete,
+    processUserResponse,
+    getCurrentQuestion,
+    resetProfiling,
+    PROFILING_STATES
+  } = useUserProfiling();
+
   // State management
   const [transcript, setTranscript] = useState("");
   const [finalTranscript, setFinalTranscript] = useState("");
@@ -13,10 +25,11 @@ export const useInterviewSession = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isAISpeaking, setIsAISpeaking] = useState(false);
   const [audioInitialized, setAudioInitialized] = useState(false);
+  const [interviewContext, setInterviewContext] = useState(null);
   const [messages, setMessages] = useState([
     {
       type: 'ai',
-      content: "Hello! I'm InterviewAI. I'm ready to help you prepare for your product manager interview. Let's start with a common question: 'Tell me about a time you failed.'",
+      content: getCurrentQuestion() || "Hello! I'm InterviewAI, and I'm here to help you practice for your upcoming interview. To give you the most personalized experience, I'd like to learn a bit about you first. This will only take 2-3 minutes. Are you ready to get started?",
       timestamp: Date.now()
     }
   ]);
@@ -69,6 +82,16 @@ export const useInterviewSession = () => {
           setTranscript("");
         } else {
           setTranscript(transcript);
+        }
+      });
+
+      socketRef.current.on("profiling_completed", ({ success, profile, interview_context, error }) => {
+        console.log("✅ Profiling completed:", { success, profile, interview_context });
+        if (success) {
+          setInterviewContext(interview_context);
+          console.log("🎯 Interview context set:", interview_context);
+        } else {
+          console.error("❌ Profiling completion error:", error);
         }
       });
     };
@@ -264,35 +287,55 @@ export const useInterviewSession = () => {
       setMessages(prev => [...prev, userMessage]);
 
       try {
-        console.log("🚀 Sending request to backend...");
-        const res = await fetch(`${API_BASE}/onboarding/`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: finalText }),
-        });
+        let reply;
+        
+        // Check if profiling is complete
+        if (isProfilingComplete) {
+          // Handle interview questions (existing logic)
+          console.log("🚀 Sending interview request to backend...");
+          const res = await fetch(`${API_BASE}/onboarding/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: finalText }),
+          });
 
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+
+          const data = await res.json();
+          reply = data?.profile?.summary || data?.echo || "No response from server";
+        } else {
+          // Handle profiling flow
+          console.log("👤 Processing profiling response...");
+          reply = processUserResponse(finalText);
+          
+          // If profiling is now complete, send profile data to backend
+          if (profilingState === PROFILING_STATES.COMPLETED && socketRef.current) {
+            console.log("✅ Profiling completed, sending to backend...");
+            socketRef.current.emit("complete_profiling", {
+              profileData: profileData
+            });
+          }
         }
-
-        const data = await res.json();
-        const reply = data?.profile?.summary || data?.echo || "No response from server";
-        console.log("🤖 Received AI response:", reply);
         
-        setResponse(reply);
-        
-        // Add AI message to chat
-        const aiMessage = {
-          type: 'ai',
-          content: reply,
-          timestamp: Date.now()
-        };
-        setMessages(prev => [...prev, aiMessage]);
-        
-        speakText(reply);
+        if (reply) {
+          console.log("🤖 AI response:", reply);
+          setResponse(reply);
+          
+          // Add AI message to chat
+          const aiMessage = {
+            type: 'ai',
+            content: reply,
+            timestamp: Date.now()
+          };
+          setMessages(prev => [...prev, aiMessage]);
+          
+          speakText(reply);
+        }
       } catch (error) {
-        console.error("❌ Error connecting to backend:", error);
-        const errorMessage = "Error connecting to backend. Please try again.";
+        console.error("❌ Error processing response:", error);
+        const errorMessage = "Error processing your response. Please try again.";
         setResponse(errorMessage);
         
         const aiMessage = {
@@ -414,10 +457,17 @@ export const useInterviewSession = () => {
     audioInitialized,
     messages,
     
+    // Profiling state
+    profilingState,
+    profileData,
+    isProfilingComplete,
+    interviewContext,
+    
     // Actions
     startRecording,
     stopRecording,
     speakText,
-    initializeAudio
+    initializeAudio,
+    resetProfiling
   };
 }; 
