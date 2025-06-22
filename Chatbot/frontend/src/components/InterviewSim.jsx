@@ -1,6 +1,7 @@
 import React from "react";
 import { useInterviewSession } from "../hooks/useInterviewSession";
 import InterviewChat from "./InterviewChat";
+import VoiceSelector from "./VoiceSelector";
 
 function InterviewSim() {
   const {
@@ -15,23 +16,35 @@ function InterviewSim() {
     profileData,
     isProfilingComplete,
     interviewContext,
+    selectedVoice,
     startRecording,
     stopRecording,
-    resetProfiling
+    resetProfiling,
+    setSelectedVoice
   } = useInterviewSession();
 
   return (
-    <InterviewChat
-      messages={messages}
-      isRecording={isRecording}
-      isConnected={isConnected}
-      onStartRecording={startRecording}
-      onStopRecording={stopRecording}
-      currentTranscript={transcript}
-      isAISpeaking={isAISpeaking}
-      isProfilingComplete={isProfilingComplete}
-      profilingState={profilingState}
-    />
+    <div className="relative h-screen">
+      <InterviewChat
+        messages={messages}
+        isRecording={isRecording}
+        isConnected={isConnected}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+        currentTranscript={transcript}
+        isAISpeaking={isAISpeaking}
+        isProfilingComplete={isProfilingComplete}
+        profilingState={profilingState}
+      />
+      
+      {/* Voice Selector - Positioned in top-right corner */}
+      <div className="absolute top-4 right-4 z-40">
+        <VoiceSelector
+          selectedVoice={selectedVoice}
+          onVoiceChange={setSelectedVoice}
+        />
+      </div>
+    </div>
   );
 }
 

@@ -21,10 +21,12 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 from routes.onboarding import onboarding_bp
 from routes.simulate import simulate_bp, register_socketio_handlers
 from routes.feedback import feedback_bp
+from routes.tts import tts_bp
 
 app.register_blueprint(onboarding_bp, url_prefix="/onboarding")
 app.register_blueprint(simulate_bp, url_prefix="/interview/simulate")
 app.register_blueprint(feedback_bp, url_prefix="/interview/feedback")
+app.register_blueprint(tts_bp, url_prefix="/tts")
 
 # Register WebSocket handlers
 register_socketio_handlers(socketio)

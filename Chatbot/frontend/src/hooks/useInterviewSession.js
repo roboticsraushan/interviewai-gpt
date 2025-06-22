@@ -26,6 +26,7 @@ export const useInterviewSession = () => {
   const [isAISpeaking, setIsAISpeaking] = useState(false);
   const [audioInitialized, setAudioInitialized] = useState(false);
   const [interviewContext, setInterviewContext] = useState(null);
+  const [selectedVoice, setSelectedVoice] = useState('neural2_male_indian');
   const [messages, setMessages] = useState([
     {
       type: 'ai',
@@ -348,91 +349,150 @@ export const useInterviewSession = () => {
     }, 500);
   };
 
-  const speakText = (text) => {
+  const speakText = async (text) => {
+    console.log("🔊 Attempting to speak with GCP TTS:", text);
+    setIsAISpeaking(true);
+
+    try {
+      // Call backend TTS service
+      const response = await fetch(`${API_BASE}/tts/synthesize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,
+          voice_type: selectedVoice, // Use user-selected voice
+          speaking_rate: 0.9,
+          pitch: 0.0,
+          volume_gain_db: 0.0,
+          format: 'base64'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`TTS API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(`TTS synthesis failed: ${data.error}`);
+      }
+
+      console.log("✅ GCP TTS synthesis successful");
+      
+      // Convert base64 to audio and play
+      const audioData = `data:audio/mpeg;base64,${data.audio_data}`;
+      const audio = new Audio(audioData);
+      
+      // Set up audio event handlers
+      audio.onloadstart = () => {
+        console.log("🔊 Audio loading started");
+      };
+      
+      audio.oncanplaythrough = () => {
+        console.log("🔊 Audio ready to play");
+      };
+      
+      audio.onplay = () => {
+        console.log("🔊 Started playing GCP TTS audio");
+        setIsAISpeaking(true);
+      };
+      
+      audio.onended = () => {
+        console.log("🔇 Finished playing GCP TTS audio");
+        setIsAISpeaking(false);
+      };
+      
+      audio.onerror = (event) => {
+        console.error("❌ Audio playback error:", event);
+        setIsAISpeaking(false);
+        
+        // Fallback to browser speech synthesis
+        console.log("🔄 Falling back to browser TTS...");
+        fallbackToWebSpeech(text);
+      };
+
+      // Play the audio
+      try {
+        await audio.play();
+        console.log("🎤 GCP TTS audio playback initiated");
+      } catch (playError) {
+        console.error("❌ Failed to play audio:", playError);
+        setIsAISpeaking(false);
+        
+        // Fallback to browser speech synthesis
+        console.log("🔄 Falling back to browser TTS...");
+        fallbackToWebSpeech(text);
+      }
+      
+    } catch (error) {
+      console.error("❌ GCP TTS error:", error);
+      setIsAISpeaking(false);
+      
+      // Fallback to browser speech synthesis
+      console.log("🔄 Falling back to browser TTS...");
+      fallbackToWebSpeech(text);
+    }
+  };
+
+  // Fallback function for browser speech synthesis
+  const fallbackToWebSpeech = (text) => {
     if (!('speechSynthesis' in window)) {
       console.warn("⚠️ Speech synthesis not supported");
+      setIsAISpeaking(false);
       return;
     }
 
-    console.log("🔊 Attempting to speak:", text);
+    console.log("🔊 Using browser TTS fallback:", text);
     setIsAISpeaking(true);
 
     // Cancel any ongoing speech
     speechSynthesis.cancel();
 
-    // Mobile-specific: Wait for voices to load
-    const speak = () => {
-      const utterance = new SpeechSynthesisUtterance(text);
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-IN"; // Use Indian English
+    utterance.rate = 0.9;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
+    // Try to find an Indian English voice
+    const voices = speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      const indianVoice = voices.find(voice => 
+        voice.lang === 'en-IN' || voice.lang.startsWith('en-IN')
+      ) || voices.find(voice => 
+        voice.lang.startsWith('en') && voice.name.toLowerCase().includes('india')
+      ) || voices.find(voice => 
+        voice.lang.startsWith('en') && voice.default
+      ) || voices[0];
       
-      // Mobile-optimized settings
-      utterance.lang = "en-US";
-      utterance.rate = 0.8; // Slightly slower for mobile
-      utterance.pitch = 1.0;
-      utterance.volume = 1.0;
-      
-      // Try to use a specific voice for better mobile compatibility
-      const voices = speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        // Prefer English voices
-        const englishVoice = voices.find(voice => 
-          voice.lang.startsWith('en') && voice.default
-        ) || voices.find(voice => 
-          voice.lang.startsWith('en')
-        ) || voices[0];
-        
-        utterance.voice = englishVoice;
-        console.log("🗣️ Using voice:", englishVoice.name);
-      }
-      
-      utterance.onstart = () => {
-        console.log("🔊 Started speaking");
-        setIsAISpeaking(true);
-      };
-      
-      utterance.onend = () => {
-        console.log("🔇 Finished speaking");
-        setIsAISpeaking(false);
-      };
-      
-      utterance.onerror = (event) => {
-        console.error("❌ Speech synthesis error:", event.error);
-        setIsAISpeaking(false);
-        
-        // Mobile fallback: Try again after a short delay
-        if (event.error === 'network' || event.error === 'synthesis-failed') {
-          console.log("🔄 Retrying speech synthesis...");
-          setTimeout(() => {
-            speechSynthesis.speak(utterance);
-          }, 500);
-        }
-      };
-      
-      // Mobile-specific: Add a small delay before speaking
-      setTimeout(() => {
-        try {
-          speechSynthesis.speak(utterance);
-          console.log("🎤 Speech synthesis initiated");
-        } catch (error) {
-          console.error("❌ Failed to initiate speech:", error);
-          setIsAISpeaking(false);
-        }
-      }, 100);
+      utterance.voice = indianVoice;
+      console.log("🗣️ Using fallback voice:", indianVoice?.name || 'default');
+    }
+
+    utterance.onstart = () => {
+      console.log("🔊 Started fallback TTS");
+      setIsAISpeaking(true);
     };
 
-    // Check if voices are loaded (important for mobile)
-    if (speechSynthesis.getVoices().length === 0) {
-      console.log("⏳ Waiting for voices to load...");
-      speechSynthesis.addEventListener('voiceschanged', speak, { once: true });
-      
-      // Fallback timeout in case voiceschanged doesn't fire
-      setTimeout(() => {
-        if (speechSynthesis.getVoices().length === 0) {
-          console.log("⚠️ No voices loaded, attempting anyway...");
-        }
-        speak();
-      }, 1000);
-    } else {
-      speak();
+    utterance.onend = () => {
+      console.log("🔇 Finished fallback TTS");
+      setIsAISpeaking(false);
+    };
+
+    utterance.onerror = (event) => {
+      console.error("❌ Fallback TTS error:", event.error);
+      setIsAISpeaking(false);
+    };
+
+    try {
+      speechSynthesis.speak(utterance);
+      console.log("🎤 Fallback TTS initiated");
+    } catch (error) {
+      console.error("❌ Failed to initiate fallback TTS:", error);
+      setIsAISpeaking(false);
     }
   };
 
@@ -456,6 +516,7 @@ export const useInterviewSession = () => {
     isAISpeaking,
     audioInitialized,
     messages,
+    selectedVoice,
     
     // Profiling state
     profilingState,
@@ -468,6 +529,7 @@ export const useInterviewSession = () => {
     stopRecording,
     speakText,
     initializeAudio,
-    resetProfiling
+    resetProfiling,
+    setSelectedVoice
   };
 }; 
