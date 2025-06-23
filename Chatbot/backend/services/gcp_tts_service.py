@@ -1,6 +1,7 @@
 import os
 import io
 import base64
+import re
 from google.cloud import texttospeech
 from typing import Optional, Dict, Any
 import logging
@@ -21,6 +22,47 @@ class GCPTextToSpeechService:
             logger.error(f"❌ Failed to initialize TTS client: {e}")
             raise
     
+    def clean_text_for_speech(self, text: str) -> str:
+        """
+        Clean text by removing markdown formatting and other characters
+        that don't sound good when spoken by TTS
+        
+        Args:
+            text: Raw text that may contain markdown formatting
+            
+        Returns:
+            Cleaned text suitable for TTS
+        """
+        if not text:
+            return text
+        
+        # Remove markdown bold/italic formatting
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # **bold** -> bold
+        text = re.sub(r'\*(.+?)\*', r'\1', text)      # *italic* -> italic
+        text = re.sub(r'__(.+?)__', r'\1', text)      # __bold__ -> bold
+        text = re.sub(r'_(.+?)_', r'\1', text)        # _italic_ -> italic
+        
+        # Remove markdown links but keep the text
+        text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)  # [text](url) -> text
+        
+        # Remove markdown headers
+        text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)  # # Header -> Header
+        
+        # Remove markdown code blocks
+        text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)  # Remove code blocks
+        text = re.sub(r'`(.+?)`', r'\1', text)  # `code` -> code
+        
+        # Remove markdown lists but keep content
+        text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)  # - item -> item
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)  # 1. item -> item
+        
+        # Clean up extra whitespace
+        text = re.sub(r'\n\s*\n', '\n\n', text)  # Multiple newlines -> double newline
+        text = re.sub(r'\s+', ' ', text)  # Multiple spaces -> single space
+        text = text.strip()
+        
+        return text
+
     # High-quality voice configurations with Indian accent
     VOICE_CONFIGS = {
         # WaveNet voices with Indian accent
@@ -46,25 +88,26 @@ class GCPTextToSpeechService:
         },
         
         # Neural2 voices with Indian accent (highest quality)
-        'neural2_male_indian': {
-            'language_code': 'en-IN',
-            'name': 'en-IN-Neural2-A',  # Male Neural2 voice
-            'ssml_gender': texttospeech.SsmlVoiceGender.MALE
-        },
+        # Fixed gender assignments based on Google Cloud TTS documentation
         'neural2_female_indian': {
             'language_code': 'en-IN',
-            'name': 'en-IN-Neural2-B',  # Female Neural2 voice
+            'name': 'en-IN-Neural2-A',  # Female Neural2 voice (corrected)
             'ssml_gender': texttospeech.SsmlVoiceGender.FEMALE
         },
-        'neural2_male_indian_2': {
+        'neural2_male_indian': {
             'language_code': 'en-IN',
-            'name': 'en-IN-Neural2-C',  # Another male Neural2 voice
+            'name': 'en-IN-Neural2-B',  # Male Neural2 voice (corrected)
             'ssml_gender': texttospeech.SsmlVoiceGender.MALE
         },
         'neural2_female_indian_2': {
             'language_code': 'en-IN',
-            'name': 'en-IN-Neural2-D',  # Another female Neural2 voice
+            'name': 'en-IN-Neural2-C',  # Female Neural2 voice (corrected)
             'ssml_gender': texttospeech.SsmlVoiceGender.FEMALE
+        },
+        'neural2_male_indian_2': {
+            'language_code': 'en-IN',
+            'name': 'en-IN-Neural2-D',  # Male Neural2 voice (corrected)
+            'ssml_gender': texttospeech.SsmlVoiceGender.MALE
         }
     }
     
@@ -97,14 +140,18 @@ class GCPTextToSpeechService:
             if voice_type is None:
                 voice_type = self.DEFAULT_VOICE
             
+            # Clean text to remove markdown formatting before TTS
+            cleaned_text = self.clean_text_for_speech(text)
+            logger.info(f"🧹 Cleaned text for TTS: Original length={len(text)}, Cleaned length={len(cleaned_text)}")
+            
             # Get voice configuration
             voice_config = self.VOICE_CONFIGS.get(voice_type)
             if not voice_config:
                 logger.warning(f"⚠️ Unknown voice type: {voice_type}, using default")
                 voice_config = self.VOICE_CONFIGS[self.DEFAULT_VOICE]
             
-            # Prepare the text input
-            synthesis_input = texttospeech.SynthesisInput(text=text)
+            # Prepare the text input with cleaned text
+            synthesis_input = texttospeech.SynthesisInput(text=cleaned_text)
             
             # Build the voice request
             voice = texttospeech.VoiceSelectionParams(

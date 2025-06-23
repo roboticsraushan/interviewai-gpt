@@ -1,3 +1,20 @@
+# 🔗 Connect AI Profiling System
+
+## Add these 2 lines to `backend/app.py`:
+
+### 1. Import the profiling blueprint:
+```python
+from routes.profiling import profiling_bp
+```
+
+### 2. Register the blueprint:
+```python
+app.register_blueprint(profiling_bp, url_prefix="/profiling")
+```
+
+## Your complete `backend/app.py` should look like:
+
+```python
 from flask import Flask, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO
@@ -22,35 +39,28 @@ from routes.onboarding import onboarding_bp
 from routes.simulate import simulate_bp, register_socketio_handlers
 from routes.feedback import feedback_bp
 from routes.tts import tts_bp
-from routes.profiling import profiling_bp
+from routes.profiling import profiling_bp  # ← ADD THIS LINE
 
 app.register_blueprint(onboarding_bp, url_prefix="/onboarding")
 app.register_blueprint(simulate_bp, url_prefix="/interview/simulate")
 app.register_blueprint(feedback_bp, url_prefix="/interview/feedback")
 app.register_blueprint(tts_bp, url_prefix="/tts")
-app.register_blueprint(profiling_bp, url_prefix="/profiling")
+app.register_blueprint(profiling_bp, url_prefix="/profiling")  # ← ADD THIS LINE
 
 # Register WebSocket handlers
 register_socketio_handlers(socketio)
 
-# Serve React frontend build from /app/static
-@app.route("/", defaults={"path": ""})
-@app.route("/<path:path>")
-def serve_react(path):
-    static_dir = app.static_folder
-    target_path = os.path.join(static_dir, path)
+# ... rest of your app.py remains the same
+```
 
-    if path and os.path.exists(target_path):
-        return send_from_directory(static_dir, path)
-    else:
-        return send_from_directory(static_dir, "index.html")
+## 🎯 This will enable these AI profiling endpoints:
 
-@app.route('/manifest.json')
-def manifest():
-    return send_from_directory(app.static_folder, 'manifest.json', mimetype='application/manifest+json')
+- `POST /profiling/start` - Start AI profiling session
+- `POST /profiling/message` - Send message to AI
+- `GET /profiling/status/<session_id>` - Check session status
+- `POST /profiling/complete/<session_id>` - Force completion
+- `GET /profiling/health` - Health check
 
+## ✅ Your system is now fully AI-powered!
 
-# Start the app
-if __name__ == "__main__":
-    print("🚀 Starting InterviewAI Flask backend + SocketIO + React")
-    socketio.run(app, host="0.0.0.0", port=5000)
+**No more hardcoded questions** - everything is dynamic and contextual! 🎉 

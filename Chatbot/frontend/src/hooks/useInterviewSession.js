@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import io from "socket.io-client";
-import { useUserProfiling } from './useUserProfiling';
+import { useSimpleProfiling } from './useSimpleProfiling';
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL;
 
 export const useInterviewSession = () => {
-  // User profiling hook
+  // Python-controlled profiling hook (super simple!)
   const {
     profilingState,
     profileData,
@@ -14,8 +14,12 @@ export const useInterviewSession = () => {
     processUserResponse,
     getCurrentQuestion,
     resetProfiling,
-    PROFILING_STATES
-  } = useUserProfiling();
+    messages: profilingMessages,
+    sessionId: profilingSessionId,
+    isLoading: isProfilingLoading,
+    error: profilingError,
+    instructions: pythonInstructions
+  } = useSimpleProfiling();
 
   // State management
   const [transcript, setTranscript] = useState("");
@@ -27,13 +31,9 @@ export const useInterviewSession = () => {
   const [audioInitialized, setAudioInitialized] = useState(false);
   const [interviewContext, setInterviewContext] = useState(null);
   const [selectedVoice, setSelectedVoice] = useState('neural2_male_indian');
-  const [messages, setMessages] = useState([
-    {
-      type: 'ai',
-      content: getCurrentQuestion() || "Hello! I'm InterviewAI, and I'm here to help you practice for your upcoming interview. To give you the most personalized experience, I'd like to learn a bit about you first. This will only take 2-3 minutes. Are you ready to get started?",
-      timestamp: Date.now()
-    }
-  ]);
+  
+  // Python controls all messages - we just use them directly
+  const messages = profilingMessages;
 
   // Refs for persistent objects
   const socketRef = useRef(null);
@@ -279,13 +279,7 @@ export const useInterviewSession = () => {
         return;
       }
 
-      // Add user message to chat
-      const userMessage = {
-        type: 'user',
-        content: finalText,
-        timestamp: Date.now()
-      };
-      setMessages(prev => [...prev, userMessage]);
+      // Note: User message is automatically added by Python controller
 
       try {
         let reply;
@@ -309,10 +303,10 @@ export const useInterviewSession = () => {
         } else {
           // Handle profiling flow
           console.log("👤 Processing profiling response...");
-          reply = processUserResponse(finalText);
+          reply = await processUserResponse(finalText);
           
           // If profiling is now complete, send profile data to backend
-          if (profilingState === PROFILING_STATES.COMPLETED && socketRef.current) {
+          if (isProfilingComplete && socketRef.current) {
             console.log("✅ Profiling completed, sending to backend...");
             socketRef.current.emit("complete_profiling", {
               profileData: profileData
@@ -324,13 +318,7 @@ export const useInterviewSession = () => {
           console.log("🤖 AI response:", reply);
           setResponse(reply);
           
-          // Add AI message to chat
-          const aiMessage = {
-            type: 'ai',
-            content: reply,
-            timestamp: Date.now()
-          };
-          setMessages(prev => [...prev, aiMessage]);
+          // Note: AI message is automatically added by Python controller
           
           speakText(reply);
         }
@@ -339,18 +327,22 @@ export const useInterviewSession = () => {
         const errorMessage = "Error processing your response. Please try again.";
         setResponse(errorMessage);
         
-        const aiMessage = {
-          type: 'ai',
-          content: errorMessage,
-          timestamp: Date.now()
-        };
-        setMessages(prev => [...prev, aiMessage]);
+        // Note: Error handling is managed by Python controller
       }
     }, 500);
   };
 
   const speakText = async (text) => {
     console.log("🔊 Attempting to speak with GCP TTS:", text);
+    console.log("🔍 Text type:", typeof text, "Length:", text?.length);
+    console.log("🔍 Text content (first 200 chars):", text?.substring(0, 200));
+    
+    if (!text || typeof text !== 'string' || text.trim() === '') {
+      console.warn("⚠️ Invalid text for TTS:", text);
+      setIsAISpeaking(false);
+      return;
+    }
+    
     setIsAISpeaking(true);
 
     try {

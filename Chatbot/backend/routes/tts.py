@@ -43,6 +43,17 @@ def synthesize_speech():
         output_format = data.get('format', 'base64')
         
         logger.info(f"🗣️ TTS request: voice={voice_type}, rate={speaking_rate}, pitch={pitch}")
+        logger.info(f"📝 Text being synthesized: '{text}'")
+        logger.info(f"🔍 Full request data: {data}")
+        
+        # Debug: Check if voice_type exists in our configs
+        from services.gcp_tts_service import tts_service
+        available_voices = tts_service.get_available_voices()
+        if voice_type not in available_voices:
+            logger.warning(f"⚠️ Unknown voice_type '{voice_type}'. Available: {list(available_voices.keys())}")
+        else:
+            voice_config = available_voices[voice_type]
+            logger.info(f"🎙️ Using voice config: {voice_config}")
         
         # Validate parameters
         if speaking_rate < 0.25 or speaking_rate > 4.0:

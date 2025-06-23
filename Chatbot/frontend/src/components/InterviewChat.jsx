@@ -106,7 +106,7 @@ const InterviewChat = ({
         </div>
 
         {/* Chat Messages Container - Fixed Height Scrollable */}
-        <div className="mx-4 mb-24" style={{ height: '450px' }}>
+        <div className="mx-4 mb-24" style={{ height: '250px' }}>
           <div 
             className="h-full border-2 border-gray-400 rounded-2xl bg-white flex flex-col overflow-hidden shadow-lg"
           >
