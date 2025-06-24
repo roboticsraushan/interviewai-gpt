@@ -20,7 +20,16 @@ function InterviewSim() {
     startRecording,
     stopRecording,
     resetProfiling,
-    setSelectedVoice
+    setSelectedVoice,
+    // Voice Activity Detection props
+    isAutoModeEnabled,
+    vadSettings,
+    vadIsListening,
+    vadIsSpeaking,
+    audioLevel,
+    vadInitialized,
+    toggleAutoMode,
+    updateVadSettings
   } = useInterviewSession();
 
   return (
@@ -35,6 +44,17 @@ function InterviewSim() {
         isAISpeaking={isAISpeaking}
         isProfilingComplete={isProfilingComplete}
         profilingState={profilingState}
+        // Voice Activity Detection props
+        isAutoModeEnabled={isAutoModeEnabled}
+        vadSettings={vadSettings}
+        vadIsListening={vadIsListening}
+        vadIsSpeaking={vadIsSpeaking}
+        audioLevel={audioLevel}
+        vadInitialized={vadInitialized}
+        onToggleAutoMode={toggleAutoMode}
+        onUpdateVadSettings={updateVadSettings}
+        selectedVoice={selectedVoice}
+        onVoiceChange={setSelectedVoice}
       />
       
       {/* Voice Selector - Positioned in top-right corner */}

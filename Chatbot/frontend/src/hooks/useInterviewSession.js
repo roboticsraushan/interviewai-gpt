@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import io from "socket.io-client";
 import { useSimpleProfiling } from './useSimpleProfiling';
+import { useVoiceActivityDetection } from './useVoiceActivityDetection';
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL;
@@ -32,6 +33,16 @@ export const useInterviewSession = () => {
   const [interviewContext, setInterviewContext] = useState(null);
   const [selectedVoice, setSelectedVoice] = useState('neural2_male_indian');
   
+  // Voice Activity Detection settings
+  const [isAutoModeEnabled, setIsAutoModeEnabled] = useState(false);
+  const [vadSettings, setVadSettings] = useState({
+    silenceThreshold: 2000, // 2 seconds of silence
+    volumeThreshold: 0.015, // Slightly higher threshold for reliability
+    smoothingTimeConstant: 0.8,
+    fftSize: 2048,
+    processingDelay: 1500 // Wait time after final transcript before processing
+  });
+
   // Python controls all messages - we just use them directly
   const messages = profilingMessages;
 
@@ -40,6 +51,58 @@ export const useInterviewSession = () => {
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
   const isRecordingRef = useRef(false);
+  const autoRecordingRef = useRef(false); // Track if we're in auto recording mode
+
+  // Voice Activity Detection integration
+  const {
+    isListening: vadIsListening,
+    isSpeaking: vadIsSpeaking,
+    audioLevel,
+    isInitialized: vadInitialized
+  } = useVoiceActivityDetection({
+    isEnabled: isAutoModeEnabled && !isAISpeaking, // Enable when auto mode is on and AI isn't speaking
+    silenceThreshold: vadSettings.silenceThreshold,
+    volumeThreshold: vadSettings.volumeThreshold,
+    smoothingTimeConstant: vadSettings.smoothingTimeConstant,
+    fftSize: vadSettings.fftSize,
+    onSpeechStart: () => {
+      console.log("🎯 VAD: Speech detected - Starting recording");
+      if (!isRecordingRef.current && !isAISpeaking) {
+        startRecording(true);
+      }
+    },
+    onSpeechEnd: () => {
+      console.log("🎯 VAD: Speech ended - Stopping recording");
+      if (isRecordingRef.current) {
+        stopRecording(true);
+      }
+    }
+  });
+
+  // Remove the auto-resume effect since VAD will handle this
+  useEffect(() => {
+    if (!isAutoModeEnabled || isAISpeaking) {
+      if (isRecordingRef.current && autoRecordingRef.current) {
+        console.log("🎯 Auto mode: Stopping recording due to state change");
+        stopRecording(true);
+        autoRecordingRef.current = false;
+      }
+    }
+  }, [isAutoModeEnabled, isAISpeaking]);
+
+  // Modify the auto mode effect to let VAD handle recording
+  useEffect(() => {
+    if (!isAutoModeEnabled && autoRecordingRef.current) {
+      console.log("🎯 Auto mode disabled: Stopping recording");
+      autoRecordingRef.current = false;
+      if (isRecordingRef.current) {
+        stopRecording(true);
+      }
+    } else if (isAutoModeEnabled) {
+      console.log("🎯 Auto mode enabled: VAD will control recording");
+      autoRecordingRef.current = true;
+    }
+  }, [isAutoModeEnabled]);
 
   // Initialize socket connection
   useEffect(() => {
@@ -80,9 +143,22 @@ export const useInterviewSession = () => {
             console.log("📋 Final transcript updated:", newFinal);
             return newFinal;
           });
-          setTranscript("");
+          setTranscript(""); // Clear interim transcript
+          
+          // In auto mode, process final transcripts after a short delay
+          if (isAutoModeEnabled && autoRecordingRef.current && transcript.trim()) {
+            console.log("🎯 Auto mode: Final transcript received, will process after delay");
+            const processingDelay = vadSettings.processingDelay || 1500;
+            setTimeout(() => {
+              console.log("🎯 Auto mode: Processing final transcript:", transcript);
+              processTranscriptInAutoMode(transcript);
+            }, processingDelay); // Use configurable delay
+          }
         } else {
-          setTranscript(transcript);
+          // Only update interim transcript if we're still recording
+          if (isRecordingRef.current) {
+            setTranscript(transcript);
+          }
         }
       });
 
@@ -154,10 +230,73 @@ export const useInterviewSession = () => {
     }
   }, [audioInitialized]);
 
-  const startRecording = async () => {
+  // Process transcript in auto mode without stopping recording
+  const processTranscriptInAutoMode = async (transcriptText) => {
+    console.log("🎯🎯🎯 processTranscriptInAutoMode CALLED with:", transcriptText);
+    console.log("🔍 Current state - isProfilingComplete:", isProfilingComplete, "isAutoModeEnabled:", isAutoModeEnabled);
+    
+    const textToProcess = transcriptText.trim();
+    
+    if (!textToProcess) {
+      console.warn("⚠️ No transcript text to process in auto mode");
+      return;
+    }
+
+    console.log("🎯 Auto mode: Processing transcript:", textToProcess);
+
+    try {
+      let reply;
+      
+      // Check if profiling is complete
+      if (isProfilingComplete) {
+        // Handle interview questions (existing logic)
+        console.log("🚀 Auto mode: Sending interview request to backend...");
+        const res = await fetch(`${API_BASE}/onboarding/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: textToProcess }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const data = await res.json();
+        reply = data?.profile?.summary || data?.echo || "No response from server";
+      } else {
+        // Handle profiling flow
+        console.log("👤 Auto mode: Processing profiling response...");
+        reply = await processUserResponse(textToProcess);
+        
+        // If profiling is now complete, send profile data to backend
+        if (isProfilingComplete && socketRef.current) {
+          console.log("✅ Auto mode: Profiling completed, sending to backend...");
+          socketRef.current.emit("complete_profiling", {
+            profileData: profileData
+          });
+        }
+      }
+      
+      if (reply) {
+        console.log("🤖 Auto mode: AI response:", reply);
+        setResponse(reply);
+        
+        // Speak the response (isAISpeaking will be set automatically)
+        await speakText(reply);
+        // Note: Recording will automatically resume when isAISpeaking becomes false
+        // due to the auto-resume effect we have
+      }
+    } catch (error) {
+      console.error("❌ Auto mode: Error processing response:", error);
+      const errorMessage = "I encountered an error processing your response. Please try again.";
+      setResponse(errorMessage);
+      await speakText(errorMessage);
+    }
+  };
+
+  const startRecording = async (autoStart = false) => {
     console.log("🎤 Starting recording...");
     
-    // Initialize audio on first user interaction (required for mobile)
     initializeAudio();
     
     if (!socketRef.current || !isConnected) {
@@ -196,10 +335,6 @@ export const useInterviewSession = () => {
         options.mimeType = 'audio/webm;codecs=opus';
       } else if (MediaRecorder.isTypeSupported('audio/webm')) {
         options.mimeType = 'audio/webm';
-      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-        options.mimeType = 'audio/mp4';
-      } else if (MediaRecorder.isTypeSupported('audio/aac')) {
-        options.mimeType = 'audio/aac';
       }
       
       console.log("🎙️ Using MediaRecorder with:", options);
@@ -213,7 +348,6 @@ export const useInterviewSession = () => {
               const base64data = reader.result.split(",")[1];
               if (socketRef.current && isRecordingRef.current) {
                 socketRef.current.emit("audio_chunk", base64data);
-                console.log("📤 Sent audio chunk:", base64data.length, "chars");
               }
             } catch (error) {
               console.error("❌ Error processing audio chunk:", error);
@@ -251,7 +385,7 @@ export const useInterviewSession = () => {
     }
   };
 
-  const stopRecording = async () => {
+  const stopRecording = async (autoStop = false) => {
     console.log("🛑 Stopping recording...");
     
     if (!isRecordingRef.current) {
@@ -259,77 +393,103 @@ export const useInterviewSession = () => {
       return;
     }
 
+    // Set recording state to false immediately for UI feedback
     setIsRecording(false);
     isRecordingRef.current = false;
+    
+    console.log("⏳ Entering grace period for final transcript processing...");
 
     if (socketRef.current) {
+      socketRef.current.emit("prepare_stop_transcription");
+      console.log("📡 Sent prepare_stop_transcription signal");
+      
+      // Wait for any interim transcript to potentially become final
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       socketRef.current.emit("stop_transcription");
       console.log("📡 Sent stop_transcription signal");
     }
 
-    cleanupMediaResources();
-
-    // Wait for final transcripts and process
-    setTimeout(async () => {
-      const finalText = finalTranscript.trim();
-      console.log("📋 Processing final transcript:", finalText);
-      
-      if (!finalText) {
-        console.warn("⚠️ No final transcript to process");
-        return;
-      }
-
-      // Note: User message is automatically added by Python controller
-
-      try {
-        let reply;
-        
-        // Check if profiling is complete
-        if (isProfilingComplete) {
-          // Handle interview questions (existing logic)
-          console.log("🚀 Sending interview request to backend...");
-          const res = await fetch(`${API_BASE}/onboarding/`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: finalText }),
-          });
-
-          if (!res.ok) {
-            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-          }
-
-          const data = await res.json();
-          reply = data?.profile?.summary || data?.echo || "No response from server";
-        } else {
-          // Handle profiling flow
-          console.log("👤 Processing profiling response...");
-          reply = await processUserResponse(finalText);
-          
-          // If profiling is now complete, send profile data to backend
-          if (isProfilingComplete && socketRef.current) {
-            console.log("✅ Profiling completed, sending to backend...");
-            socketRef.current.emit("complete_profiling", {
-              profileData: profileData
-            });
-          }
-        }
-        
-        if (reply) {
-          console.log("🤖 AI response:", reply);
-          setResponse(reply);
-          
-          // Note: AI message is automatically added by Python controller
-          
-          speakText(reply);
-        }
-      } catch (error) {
-        console.error("❌ Error processing response:", error);
-        const errorMessage = "Error processing your response. Please try again.";
-        setResponse(errorMessage);
-        
-        // Note: Error handling is managed by Python controller
-      }
+    // Clean up media resources after a delay to allow final processing
+    setTimeout(() => {
+      cleanupMediaResources();
     }, 500);
+
+    // Process final transcript
+    setTimeout(() => {
+      const finalText = finalTranscript.trim();
+      const interimText = transcript.trim();
+      
+      if (finalText || interimText) {
+        const textToProcess = finalText || interimText;
+        console.log("✅ Processing final transcript:", textToProcess);
+        
+        if (isAutoModeEnabled) {
+          processTranscriptInAutoMode(textToProcess);
+        } else {
+          processFinalTranscript(textToProcess);
+        }
+      } else {
+        console.warn("⚠️ No transcript available");
+      }
+    }, 1200);
+  };
+
+  // Add the processFinalTranscript function definition
+  const processFinalTranscript = async (textToProcess) => {
+    if (!textToProcess) {
+      console.warn("⚠️ No text to process");
+      setResponse("I didn't catch that. Could you please repeat?");
+      await speakText("I didn't catch that. Could you please repeat?");
+      return;
+    }
+
+    console.log("✅ Processing transcript:", textToProcess);
+
+    try {
+      let reply;
+      
+      // Check if profiling is complete
+      if (isProfilingComplete) {
+        // Handle interview questions
+        console.log("🚀 Sending interview request to backend...");
+        const res = await fetch(`${API_BASE}/onboarding/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: textToProcess }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const data = await res.json();
+        reply = data?.profile?.summary || data?.echo || "No response from server";
+      } else {
+        // Handle profiling flow
+        console.log("👤 Processing profiling response...");
+        reply = await processUserResponse(textToProcess);
+        
+        // If profiling is now complete, send profile data to backend
+        if (isProfilingComplete && socketRef.current) {
+          console.log("✅ Profiling completed, sending to backend...");
+          socketRef.current.emit("complete_profiling", {
+            profileData: profileData
+          });
+        }
+      }
+      
+      if (reply) {
+        console.log("🤖 AI response:", reply);
+        setResponse(reply);
+        await speakText(reply);
+      }
+    } catch (error) {
+      console.error("❌ Error processing response:", error);
+      const errorMessage = "I encountered an error processing your response. Please try again.";
+      setResponse(errorMessage);
+      await speakText(errorMessage);
+    }
   };
 
   const speakText = async (text) => {
@@ -498,6 +658,40 @@ export const useInterviewSession = () => {
     };
   }, [cleanupMediaResources]);
 
+  // Toggle auto mode
+  const toggleAutoMode = useCallback(() => {
+    setIsAutoModeEnabled(prev => {
+      const newValue = !prev;
+      console.log(`🎯 Auto mode ${newValue ? 'enabled' : 'disabled'}`);
+      
+      // If disabling auto mode while recording, stop recording
+      if (!newValue && isRecordingRef.current && autoRecordingRef.current) {
+        stopRecording(true);
+        autoRecordingRef.current = false;
+      }
+      
+      return newValue;
+    });
+  }, []);
+
+  // Update VAD settings
+  const updateVadSettings = useCallback((newSettings) => {
+    setVadSettings(prev => ({
+      ...prev,
+      ...newSettings
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (isAutoModeEnabled && !isAISpeaking) {
+      if (vadIsSpeaking && !isRecordingRef.current) {
+        startRecording(true);
+      } else if (!vadIsSpeaking && isRecordingRef.current) {
+        stopRecording(true);
+      }
+    }
+  }, [vadIsSpeaking, isAutoModeEnabled, isAISpeaking]);
+
   return {
     // State
     transcript,
@@ -516,12 +710,29 @@ export const useInterviewSession = () => {
     isProfilingComplete,
     interviewContext,
     
+    // Voice Activity Detection state
+    isAutoModeEnabled,
+    vadSettings,
+    vadIsListening,
+    vadIsSpeaking,
+    audioLevel,
+    vadInitialized,
+    
     // Actions
     startRecording,
     stopRecording,
     speakText,
     initializeAudio,
     resetProfiling,
-    setSelectedVoice
+    setSelectedVoice,
+    toggleAutoMode,
+    updateVadSettings,
+    
+    // Python instructions
+    pythonInstructions,
+    
+    // Loading/Error states
+    isProfilingLoading,
+    profilingError
   };
 }; 

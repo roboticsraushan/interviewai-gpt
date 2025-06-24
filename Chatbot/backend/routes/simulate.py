@@ -26,13 +26,19 @@ recognition_config = speech.RecognitionConfig(
     language_code="en-US",
     enable_automatic_punctuation=True,
     model="default",
-    use_enhanced=True #enables phone-quality model
+    use_enhanced=True, #enables phone-quality model
+    # Speech detection sensitivity parameters
+    speech_contexts=[],
+    max_alternatives=1,
+    profanity_filter=False
 )
 
 streaming_config = speech.StreamingRecognitionConfig(
     config=recognition_config,
     interim_results=True,
     single_utterance=False
+    # Note: Advanced voice activity detection parameters removed due to API compatibility
+    # The frontend will handle silence detection instead
 )
 
 # Session management - use dict to track per-client sessions
@@ -48,6 +54,7 @@ def register_socketio_handlers(socketio):
             'audio_queue': queue.Queue(),
             'transcription_thread': None,
             'stop_streaming': False,
+            'preparing_to_stop': False,
             'socket_id': request.sid,  # Store the socket ID for this session
             'profiling_complete': False,
             'user_profile': None
@@ -140,6 +147,26 @@ def register_socketio_handlers(socketio):
         )
         session_obj['transcription_thread'].start()
 
+    @socketio.on("prepare_stop_transcription")
+    def prepare_stop_transcription():
+        """
+        Prepare to stop transcription - allows for graceful shutdown
+        """
+        session_id = session.get('session_id')
+        
+        if not session_id or session_id not in active_sessions:
+            print("❌ No valid session found for prepare_stop_transcription")
+            return
+            
+        session_obj = active_sessions[session_id]
+        print(f"⏳ Preparing to stop transcription for session: {session_id}")
+        
+        # Mark as preparing to stop (but don't stop yet)
+        session_obj['preparing_to_stop'] = True
+        
+        # Give Google Cloud STT time to process final chunks
+        # The actual stop will come from stop_transcription
+
     @socketio.on("stop_transcription")
     def stop_transcription():
         session_id = session.get('session_id')
@@ -150,14 +177,30 @@ def register_socketio_handlers(socketio):
             
         session_obj = active_sessions[session_id]
         print(f"🛑 Stopping transcription for session: {session_id}")
-        session_obj['stop_streaming'] = True
         
-        # Clear the queue
-        try:
-            while not session_obj['audio_queue'].empty():
-                session_obj['audio_queue'].get_nowait()
-        except queue.Empty:
-            pass
+        # Set stop flag
+        session_obj['stop_streaming'] = True
+        session_obj['preparing_to_stop'] = False
+        
+        # Don't clear the queue immediately - let it drain naturally
+        # This allows final audio chunks to be processed
+        
+        # Wait a moment for final transcripts, then clear
+        def delayed_cleanup():
+            import time
+            time.sleep(2)  # Give 2 seconds for final processing
+            try:
+                if session_id in active_sessions:
+                    while not session_obj['audio_queue'].empty():
+                        session_obj['audio_queue'].get_nowait()
+                    print(f"🧹 Cleaned up audio queue for session: {session_id}")
+            except queue.Empty:
+                pass
+        
+        # Run cleanup in background thread
+        cleanup_thread = threading.Thread(target=delayed_cleanup)
+        cleanup_thread.daemon = True
+        cleanup_thread.start()
 
     @socketio.on("complete_profiling")
     def handle_complete_profiling(data):
@@ -185,7 +228,7 @@ def register_socketio_handlers(socketio):
                 "success": True,
                 "profile": profile,
                 "interview_context": interview_context
-            })
+            }, room=active_sessions[session_id]['socket_id'])
             
             print(f"✅ Profiling completed for session: {session_id}")
             
@@ -194,7 +237,7 @@ def register_socketio_handlers(socketio):
             socketio.emit("profiling_completed", {
                 "success": False,
                 "error": str(e)
-            })
+            }, room=active_sessions[session_id]['socket_id'])
 
     @socketio.on("get_profile")
     def handle_get_profile():
@@ -208,12 +251,12 @@ def register_socketio_handlers(socketio):
         profile = profile_builder.get_profile(session_id)
         socketio.emit("profile_data", {
             "profile": profile
-        })
+        }, room=active_sessions[session_id]['socket_id'])
 
 # --- Streaming transcription task ---
 
 def audio_generator(session_id):
-    """Generate audio chunks for a specific session"""
+    """Generate audio chunks for a specific session with enhanced buffering"""
     if session_id not in active_sessions:
         return
         
@@ -221,8 +264,9 @@ def audio_generator(session_id):
     
     while not session_obj['stop_streaming'] and session_id in active_sessions:
         try:
-            # Use timeout to avoid blocking indefinitely
-            chunk = session_obj['audio_queue'].get(timeout=1.0)
+            # Adjust timeout based on whether we're preparing to stop
+            timeout = 0.5 if session_obj.get('preparing_to_stop', False) else 1.0
+            chunk = session_obj['audio_queue'].get(timeout=timeout)
             
             if chunk is None:
                 print("Received empty chunk - skipping")
@@ -236,7 +280,11 @@ def audio_generator(session_id):
             yield speech.StreamingRecognizeRequest(audio_content=chunk)
             
         except queue.Empty:
-            # Timeout occurred, check if we should continue
+            # If preparing to stop and queue is empty, break gracefully
+            if session_obj.get('preparing_to_stop', False):
+                print(f"⏳ Gracefully ending audio stream for session: {session_id}")
+                break
+            # Otherwise, continue waiting
             continue
         except Exception as e:
             print(f"❌ Error in audio generator: {e}")
@@ -269,11 +317,11 @@ def transcribe_stream_background(socketio, session_id):
             transcript = result.alternatives[0].transcript
             is_final = result.is_final
 
-            # Emit transcript back to frontend
+            # Emit transcript back to frontend for this specific session
             socketio.emit("transcript_update", {
                 "transcript": transcript,
                 "isFinal": is_final
-            })
+            }, room=session_obj['socket_id'])
             
             print(f"📝 Transcript ({'final' if is_final else 'interim'}): {transcript}")
             

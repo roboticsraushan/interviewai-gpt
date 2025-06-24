@@ -14,7 +14,7 @@ CORS(app)  # Enable CORS
 # Secret key (optional fallback)
 app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default_secret_key")
 
-# Setup Socket.IO with CORS
+# Setup Socket.IO with CORS - using default mode for better compatibility
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Import and register Blueprints

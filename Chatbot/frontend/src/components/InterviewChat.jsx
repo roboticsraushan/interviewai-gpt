@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import micLogo from "../assets/mic_logo.png";
 import jobs_logo from "../assets/jobs.png";
 import einstein_logo from "../assets/einstein.png";
+import VoiceSettings from "./VoiceSettings";
 
 const InterviewChat = ({
   messages = [],
@@ -12,32 +13,95 @@ const InterviewChat = ({
   currentTranscript = "",
   isAISpeaking = false,
   isProfilingComplete = false,
-  profilingState = null
+  profilingState = null,
+  // Voice Activity Detection props
+  isAutoModeEnabled = false,
+  vadSettings = {},
+  vadIsListening = false,
+  vadIsSpeaking = false,
+  audioLevel = 0,
+  vadInitialized = false,
+  onToggleAutoMode,
+  onUpdateVadSettings,
+  selectedVoice,
+  onVoiceChange
 }) => {
   const messagesEndRef = useRef(null);
   const [isListening, setIsListening] = useState(false);
+  const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
 
   // Auto scroll to bottom when new messages arrive or when transcript updates
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, currentTranscript]);
 
-  // Simulate listening animation
+  // Enhanced listening animation with VAD support
   useEffect(() => {
-    if (isRecording) {
-      setIsListening(true);
+    if (isAutoModeEnabled) {
+      // In auto mode, use VAD speaking state
+      setIsListening(vadIsSpeaking);
+      setIsProcessingTranscript(false);
     } else {
-      const timer = setTimeout(() => setIsListening(false), 500);
-      return () => clearTimeout(timer);
+      // In manual mode, use recording state
+      if (isRecording) {
+        setIsListening(true);
+        setIsProcessingTranscript(false);
+      } else {
+        const timer = setTimeout(() => {
+          setIsListening(false);
+          // Show processing state briefly after recording stops
+          if (currentTranscript) {
+            setIsProcessingTranscript(true);
+            setTimeout(() => setIsProcessingTranscript(false), 3000);
+          }
+        }, 500);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [isRecording]);
+  }, [isRecording, currentTranscript, isAutoModeEnabled, vadIsSpeaking]);
 
   const handleRecordingToggle = () => {
-    if (isRecording) {
-      onStopRecording();
-    } else {
-      onStartRecording();
+    // Only allow manual control when auto mode is disabled
+    if (!isAutoModeEnabled) {
+      if (isRecording) {
+        onStopRecording();
+      } else {
+        onStartRecording();
+      }
     }
+  };
+
+  // Helper function to get recording status message
+  const getRecordingStatus = () => {
+    if (isAISpeaking) return "AI is speaking...";
+    if (isProcessingTranscript) return "Processing your response...";
+    
+    // Remove auto mode status messages
+    if (!isConnected) return "Connecting...";
+    if (isRecording) return "Listening... (Speak clearly)";
+    return "Ready to listen";
+  };
+
+  // Helper function to get status color
+  const getStatusColor = () => {
+    if (isAISpeaking) return "text-purple-300";
+    if (isProcessingTranscript) return "text-yellow-300";
+    
+    // Remove auto mode colors
+    if (!isConnected) return "text-red-300";
+    if (isRecording) return "text-green-300";
+    return "text-gray-300";
+  };
+
+  // Helper function to get indicator color and animation
+  const getIndicatorStyle = () => {
+    if (isAISpeaking) return 'bg-purple-400 animate-pulse';
+    if (isProcessingTranscript) return 'bg-yellow-400 animate-pulse';
+    
+    // Remove auto mode styles
+    if (!isConnected) return 'bg-red-400';
+    if (isRecording) return 'bg-green-400 animate-pulse';
+    return 'bg-gray-400';
   };
 
   return (
@@ -154,7 +218,7 @@ const InterviewChat = ({
                       </div>
                       <div className="px-4 py-3 bg-blue-500 text-white rounded-2xl rounded-tr-sm shadow-lg opacity-75">
                         <div className="text-xs text-blue-100 mb-1 font-medium flex items-center">
-                          <span>YOU (speaking...)</span>
+                          <span>{getRecordingStatus()}</span>
                           <div className="ml-2 flex space-x-1">
                             <div className="w-1 h-1 bg-blue-200 rounded-full animate-pulse"></div>
                             <div className="w-1 h-1 bg-blue-200 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
@@ -177,6 +241,37 @@ const InterviewChat = ({
                 {/* Fixed Bottom Microphone Button */}
         <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-50">
           <div className="flex flex-col items-center space-y-4">
+            {/* Status Indicator */}
+            <div className="bg-black bg-opacity-60 backdrop-blur-sm px-4 py-2 rounded-full border border-gray-600">
+              <div className="flex items-center space-x-2">
+                <div className={`w-2 h-2 rounded-full ${getIndicatorStyle()}`} />
+                <span className={`text-xs font-medium ${getStatusColor()}`}>
+                  {getRecordingStatus()}
+                </span>
+              </div>
+            </div>
+            
+            {/* Helpful Tips - Show when not recording */}
+            {!isRecording && !isAISpeaking && !isProcessingTranscript && (
+              <div className="bg-blue-900 bg-opacity-40 backdrop-blur-sm px-3 py-2 rounded-lg border border-blue-600 max-w-xs">
+                <div className="text-xs text-blue-200 text-center">
+                  💡 <strong>Tip:</strong> Speak clearly, then wait 1-2 seconds before stopping recording for best results
+                </div>
+              </div>
+            )}
+
+            {/* Voice Settings */}
+            <VoiceSettings
+              currentVoice={selectedVoice}
+              onVoiceChange={onVoiceChange}
+              isAutoModeEnabled={isAutoModeEnabled}
+              onToggleAutoMode={onToggleAutoMode}
+              vadSettings={vadSettings}
+              onUpdateVadSettings={onUpdateVadSettings}
+              audioLevel={audioLevel}
+              vadInitialized={vadInitialized}
+            />
+            
             {/* Microphone Button */}
             <button
               onClick={handleRecordingToggle}
@@ -185,7 +280,11 @@ const InterviewChat = ({
                 isRecording 
                   ? 'bg-red-500 bg-opacity-50 hover:bg-red-600 hover:bg-opacity-60 animate-pulse scale-105 shadow-red-500/30' 
                   : 'bg-blue-600 bg-opacity-50 hover:bg-blue-700 hover:bg-opacity-60 hover:scale-105 shadow-blue-600/30'
-              } ${!isConnected ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:shadow-lg'}`}
+              } ${
+                !isConnected 
+                  ? 'opacity-30 cursor-not-allowed' 
+                  : 'cursor-pointer hover:shadow-lg'
+              }`}
             >
               <div className="w-full h-full flex items-center justify-center p-1">
                 <img 

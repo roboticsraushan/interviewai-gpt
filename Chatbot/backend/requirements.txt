@@ -18,8 +18,8 @@ google-cloud-texttospeech==2.16.4
 # Google Generative AI (Gemini)
 google-generativeai==0.3.2
 
-# WebSocket Support
-eventlet==0.33.3  # Required by Flask-SocketIO for async mode
+# WebSocket Support - removed eventlet to avoid compatibility issues
+# eventlet==0.33.3  # Commented out - may cause Werkzeug conflicts
 
 # Optional but helpful
 requests==2.31.0
